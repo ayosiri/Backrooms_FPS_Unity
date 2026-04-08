@@ -20,7 +20,7 @@ public class PlayerInteract : MonoBehaviour
     {
         cam = GetComponentInChildren<Camera>();
         playerUI = GetComponent<PlayerUI>();
-        // Debug.Log("Yooo COUUSSSS");
+        // Debug.Log("Hit Check");
     }
 
     public void DisableInteraction()
