@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.AI;
 
+// Controls enemy AI behavior including detection, chasing, attacking, and searching
 public class EnemyFollowBackUp : MonoBehaviour
 {
     private PlayerHealth playerHealth;
@@ -34,6 +35,7 @@ public class EnemyFollowBackUp : MonoBehaviour
     public AudioClip chaseLoop;
     public AudioClip attackLoop;
     public AudioClip searchLoop;
+    public float attackToChaseAudioDelay = 0.6f;
 
     private AudioSource audioSource;
 
@@ -42,6 +44,7 @@ public class EnemyFollowBackUp : MonoBehaviour
     public float searchMinDistance = 2f;
     public float searchMaxVolume = .75f;
 
+    // Tracks current audio behavior to prevent unnecessary restarts
     private enum AudioState
     {
         None,
@@ -52,6 +55,7 @@ public class EnemyFollowBackUp : MonoBehaviour
 
     private AudioState currentAudioState = AudioState.None;
 
+    // Core AI state machine
     private enum State
     {
         Chase,
@@ -76,6 +80,7 @@ public class EnemyFollowBackUp : MonoBehaviour
 
         playerHealth = player.GetComponent<PlayerHealth>();
 
+        // Configure navigation stopping behavior
         agent.stoppingDistance = attackDistance;
         agent.autoBraking = true;
 
@@ -95,14 +100,14 @@ public class EnemyFollowBackUp : MonoBehaviour
         bool canSeePlayer = CanSeePlayer();
         float distanceToPlayer = FlatDistance(transform.position, player.position);
 
-        // If enemy loses sight while chasing or attacking
+        // Transition to last known position if player is lost during chase/attack
         if (!canSeePlayer && (currentState == State.Chase || currentState == State.Attack))
         {
             agent.ResetPath();
             SetState(State.GoToLastKnown);
         }
 
-        // Prevent attacking while reacting to damage
+        // Prevent state switching while reacting to damage
         if (!isReacting)
         {
             if (canSeePlayer)
@@ -147,7 +152,7 @@ public class EnemyFollowBackUp : MonoBehaviour
                 break;
         }
 
-        // adjust search audio volume based on player distance
+        // Adjust search audio volume based on player proximity
         if (currentAudioState == AudioState.Search && audioSource != null && player != null)
         {
             float distance = Vector3.Distance(transform.position, player.position);
@@ -162,11 +167,9 @@ public class EnemyFollowBackUp : MonoBehaviour
                 audioSource.volume = t * searchMaxVolume;
             }
         }
-
-        // Muted debug
-        // Debug.Log(currentState + " | hasSearchPoint=" + hasSearchPoint + " | stateTimer=" + stateTimer + " | vel=" + agent.velocity.magnitude + " | remaining=" + agent.remainingDistance);
     }
 
+    // Handles transitions between AI states
     void SetState(State newState)
     {
         if (isDead) return;
@@ -177,7 +180,6 @@ public class EnemyFollowBackUp : MonoBehaviour
         switch (currentState)
         {
             case State.Chase:
-
                 agent.isStopped = false;
                 agent.ResetPath();
                 agent.SetDestination(player.position);
@@ -185,12 +187,18 @@ public class EnemyFollowBackUp : MonoBehaviour
                 animator.SetBool("isRunning", true);
                 animator.SetBool("isWalking", false);
 
-                SetAudio(AudioState.Chase, chaseLoop);
-
+                // Delay audio transition if coming from attack state
+                if (currentAudioState == AudioState.Attack)
+                {
+                    StartCoroutine(DelayedChaseAudio());
+                }
+                else
+                {
+                    SetAudio(AudioState.Chase, chaseLoop);
+                }
                 break;
 
             case State.Attack:
-
                 if (isReacting) return;
 
                 agent.isStopped = true;
@@ -201,11 +209,9 @@ public class EnemyFollowBackUp : MonoBehaviour
                 animator.SetTrigger("Attack");
 
                 SetAudio(AudioState.Attack, attackLoop);
-
                 break;
 
             case State.GoToLastKnown:
-
                 agent.ResetPath();
                 agent.velocity = Vector3.zero;
                 agent.isStopped = false;
@@ -214,16 +220,15 @@ public class EnemyFollowBackUp : MonoBehaviour
                 animator.SetBool("isRunning", false);
                 animator.SetBool("isWalking", false);
 
+                // Stop looping audio when target is lost
                 if (audioSource != null)
                 {
                     audioSource.Stop();
                     currentAudioState = AudioState.None;
                 }
-
                 break;
 
             case State.SearchIdle:
-
                 agent.isStopped = true;
                 agent.ResetPath();
 
@@ -231,11 +236,9 @@ public class EnemyFollowBackUp : MonoBehaviour
                 animator.SetBool("isWalking", false);
 
                 SetAudio(AudioState.Search, searchLoop);
-
                 break;
 
             case State.SearchWalk:
-
                 hasSearchPoint = false;
 
                 agent.isStopped = true;
@@ -245,11 +248,11 @@ public class EnemyFollowBackUp : MonoBehaviour
                 animator.SetBool("isWalking", false);
 
                 SetAudio(AudioState.Search, searchLoop);
-
                 break;
         }
     }
 
+    // Continuously moves toward player while maintaining rotation
     void UpdateChase()
     {
         if (isReacting) return;
@@ -270,6 +273,7 @@ public class EnemyFollowBackUp : MonoBehaviour
         }
     }
 
+    // Handles attack positioning and facing logic
     void UpdateAttack()
     {
         if (isReacting) return;
@@ -290,6 +294,7 @@ public class EnemyFollowBackUp : MonoBehaviour
         }
     }
 
+    // Moves enemy to last known player position before entering search behavior
     void UpdateGoToLastKnown()
     {
         agent.isStopped = false;
@@ -305,6 +310,7 @@ public class EnemyFollowBackUp : MonoBehaviour
         }
     }
 
+    // Idle phase before selecting a new search point
     void UpdateSearchIdle()
     {
         agent.isStopped = true;
@@ -317,10 +323,10 @@ public class EnemyFollowBackUp : MonoBehaviour
         {
             hasSearchPoint = false;
             SetState(State.SearchWalk);
-            return;
         }
     }
 
+    // Randomized movement while searching for player
     void UpdateSearchWalk()
     {
         if (!hasSearchPoint)
@@ -371,13 +377,12 @@ public class EnemyFollowBackUp : MonoBehaviour
         }
     }
 
+    // Applies damage to enemy and triggers reaction or death
     public void TakeDamage(float damage)
     {
         if (isDead) return;
 
         health -= damage;
-
-        Debug.Log("Enemy health now: " + health);  // shows every hit
 
         if (health > 0)
         {
@@ -385,11 +390,11 @@ public class EnemyFollowBackUp : MonoBehaviour
         }
         else
         {
-            Debug.Log("ENEMY HEALTH REACHED ZERO - DIE() CALLED");  // <-- THIS IS THE IMPORTANT ONE
             Die();
         }
     }
 
+    // Temporarily interrupts AI behavior when hit
     System.Collections.IEnumerator ReactToHit()
     {
         isReacting = true;
@@ -403,24 +408,22 @@ public class EnemyFollowBackUp : MonoBehaviour
 
         isReacting = false;
 
-        // force AI to immediately pick correct state again
         SetState(State.Chase);
     }
 
+    // Handles enemy death sequence including animation, audio, and cleanup
     void Die()
     {
         if (isDead) return;
 
         isDead = true;
 
-        // stop any looping audio (search/chase/attack)
         if (audioSource != null)
         {
             audioSource.Stop();
             currentAudioState = AudioState.None;
         }
 
-        // play death sound
         if (audioSource != null && deathSound != null)
             audioSource.PlayOneShot(deathSound);
 
@@ -435,70 +438,3 @@ public class EnemyFollowBackUp : MonoBehaviour
 
         StartCoroutine(DestroyAfterDeath());
     }
-
-    public void DamagePlayer()
-    {
-        if (isDead) return;
-
-        if (playerHealth != null)
-        {
-            playerHealth.TakeDamage(10f);
-        }
-    }
-
-    System.Collections.IEnumerator DestroyAfterDeath()
-    {
-        yield return new WaitForSeconds(4.5f); // length of death animation
-
-        Destroy(gameObject);
-    }
-
-    void SetAudio(AudioState newAudioState, AudioClip clip)
-    {
-        if (audioSource == null || clip == null) return;
-
-        if (currentAudioState == newAudioState)
-            return;
-
-        audioSource.Stop();
-
-        audioSource.clip = clip;
-        audioSource.Play();
-
-        currentAudioState = newAudioState;
-    }
-
-    bool CanSeePlayer()
-    {
-        Vector3 eyePos = transform.position + Vector3.up * eyeHeight;
-        Vector3 playerTarget = player.position + Vector3.up * 1f;
-
-        Vector3 direction = playerTarget - eyePos;
-        float distance = direction.magnitude;
-
-        if (distance > visionDistance)
-            return false;
-
-        float angle = Vector3.Angle(transform.forward, direction.normalized);
-
-        if (angle > visionAngle)
-            return false;
-
-        RaycastHit hit;
-
-        if (Physics.Raycast(eyePos, direction.normalized, out hit, visionDistance))
-        {
-            if (hit.transform != player)
-                return false;
-        }
-
-        return true;
-    }
-
-    float FlatDistance(Vector3 a, Vector3 b)
-    {
-        a.y = 0f;
-        b.y = 0f;
-        return Vector3.Distance(a, b);
-    }
-}
